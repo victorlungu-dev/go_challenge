@@ -2,54 +2,60 @@ package omdb
 
 import (
 	"azarc.io/internal/argparser"
-	"fmt"
+	"azarc.io/internal/imdb"
 	"strings"
+	"sync"
 )
 
 type Consumer struct {
-	InChannel     chan string
-	OutChannel    chan interface{}
-	Quit          chan bool
-	NumGoRoutines int
-	Filters       argparser.Filters
+	InChannel  chan string
+	OutChannel chan *imdb.Movie
+	Quit       chan bool
+	Workers    int
+	Repo       imdb.MovieRepo
+	Header     *argparser.TsvHeader
+	Config     *argparser.Configuration
 }
 
 func (c Consumer) Consume() {
-	for i := 0; i <= c.NumGoRoutines; i++ {
-		go func(workerId int) {
-			fmt.Printf("Start worker-%d\n", workerId)
+	var wg sync.WaitGroup
+	for i := 0; i < c.Workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
 			for {
 				select {
 				case in := <-c.InChannel:
-					c.worker(in)
+					err := c.worker(in)
+					if err != nil {
+						return
+					}
 				case <-c.Quit:
 					return
 				}
 			}
-		}(i)
+		}()
 	}
-
+	wg.Wait()
+	c.Quit <- true
+	close(c.OutChannel)
 }
 
-func (c Consumer) worker(in string) {
-
-	filtered := c.filter(in)
-	if filtered {
-		fmt.Println(in)
-		//movie := NewMovieFromString(in)
-		//c.OutChannel <- movie
-	}
-}
-
-func (c Consumer) filter(in string) bool {
-	// this needs a refactor to apply all the filters
+func (c Consumer) worker(in string) error {
 	parts := strings.Split(in, "\t")
+	filtered := c.Config.Filters.Filter(Header, parts)
+	if filtered {
+		movie, err := c.Repo.Retrieve(parts[0])
+		if err != nil {
+			return err
+		}
 
-	if c.Filters.PrimaryTitle != "" && c.Filters.PrimaryTitle == parts[2] {
-		return true
+		if c.Config.RegExpFilter.MatchString(movie.Plot) {
+			c.OutChannel <- movie
+			return nil
+		}
+
 	}
-	if c.Filters.PrimaryTitle == "" {
-		return true
-	}
-	return false
+	return nil
 }

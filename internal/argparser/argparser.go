@@ -4,37 +4,26 @@ import (
 	"errors"
 	"fmt"
 	arglib "github.com/akamensky/argparse"
+	"os"
+	"regexp"
 )
 
 type Options struct {
-	FilePath      string // absolute path to the file to be processed
-	MaxApiRequest string // maximum number of requests to be made to the omdbapi
-	MaxRunTime    int    //
-	MaxRequests   string //
-	NumGoRoutines int    //
-}
-
-// Needs a refactor with a struct filter and handling the list
-type Filters struct {
-	TitleType      string //
-	PrimaryTitle   string //
-	OriginalTitle  string //
-	Genre          string //
-	IsAdult        string //
-	StartYear      int    //
-	EndYear        int    //
-	RunTimeMinutes int    //
-	Genres         string //
-	PlotFilter     string //
+	FilePath      string
+	MaxRunTime    int
+	MaxRequests   int
+	NumGoRoutines int
 }
 
 type Configuration struct {
-	Opts    Options
-	Filters Filters
+	Opts         Options
+	Filters      StringFilters
+	RegExpFilter *regexp.Regexp
+	ApiKey       string
 }
 
-func NewArgParser(name, decription string) *arglib.Parser {
-	parser := arglib.NewParser(name, decription)
+func NewArgParser(name, description string) *arglib.Parser {
+	parser := arglib.NewParser(name, description)
 	return parser
 }
 
@@ -44,23 +33,25 @@ func ParseIntoConfig(p *arglib.Parser, args []string) (*Configuration, error) {
 		fmt.Print(p.Usage(msg))
 		return nil, errors.New(msg)
 	}
-
+	// configurations
 	filePath := p.String("", "filePath", &arglib.Options{Required: true, Help: "String to print"})
-	maxRequests := p.String("", "maxRequests", &arglib.Options{Help: "String to print"})
-	maxRunTime := p.Int("", "maxRunTime", &arglib.Options{Help: "String to print"})
-	maxApiRequest := p.String("", "maxApiRequest", &arglib.Options{Help: "String to print"})
-	numGoRoutines := p.Int("", "numGoRoutines", &arglib.Options{Help: "String to print"})
+	apiKey := p.String("", "apiKey", &arglib.Options{Help: "Omdb api key"})
+	maxRequests := p.Int("", "maxRequests", &arglib.Options{Help: "Max number of requests to be made to omdbAPi"})
+	maxRunTime := p.Int("", "maxRunTime", &arglib.Options{Help: "Max number of seconds that the program can run before softquitting"})
+	//maxApiRequest := p.String("", "maxApiRequest", &arglib.Options{Help: "String to print"})
+	numGoRoutines := p.Int("", "numGoRoutines", &arglib.Options{Help: "Number of goroutines to use for the task", Default: 10})
 
-	titleType := p.String("", "titleType", &arglib.Options{Help: "String to print"})
-	primaryTitle := p.String("", "primaryTitle", &arglib.Options{Help: "String to print"})
-	originalTitle := p.String("", "originalTitle", &arglib.Options{Help: "String to print"})
-	isAdult := p.String("", "isAdult", &arglib.Options{Help: "String to print"})
-	genre := p.String("", "genre", &arglib.Options{Help: "String to print"})
-	plotFilter := p.String("", "plotFilter", &arglib.Options{Help: "String to print"})
-	startYear := p.Int("", "startYear", &arglib.Options{Help: "String to print"})
-	endYear := p.Int("", "endYear", &arglib.Options{Help: "String to print"})
-	genres := p.String("", "genres", &arglib.Options{Help: "String to print"})
-	runTimeMinutes := p.Int("", "runTimeMinutes", &arglib.Options{Help: "String to print"})
+	// filters
+	titleType := p.String("", "titleType", &arglib.Options{Help: "Title filter"})
+	primaryTitle := p.String("", "primaryTitle", &arglib.Options{Help: "Primary title filter"})
+	originalTitle := p.String("", "originalTitle", &arglib.Options{Help: "Original title filter"})
+	genre := p.String("", "genre", &arglib.Options{Help: "Genre filter"})
+	genres := p.String("", "genres", &arglib.Options{Help: "Genres filter"})
+	plotFilter := p.String("", "plotFilter", &arglib.Options{Help: "Regexp to us in plot filtering from omdbAPi"})
+
+	startYear := p.String("", "startYear", &arglib.Options{Help: "Start year filter"})
+	runTimeMinutes := p.String("", "runTimeMinutes", &arglib.Options{Help: "Runtimeminutes filter"})
+	endYear := p.String("", "endYear", &arglib.Options{Help: "End year filter"})
 
 	err := p.Parse(args)
 
@@ -70,26 +61,52 @@ func ParseIntoConfig(p *arglib.Parser, args []string) (*Configuration, error) {
 		fmt.Print(p.Usage(err))
 		return nil, err
 	}
+
+	stringFilters := StringFilters{}
+	if *startYear != "" {
+		stringFilters = append(stringFilters, NewStringFilter("startYear", *startYear))
+	}
+	if *endYear != "" {
+		stringFilters = append(stringFilters, NewStringFilter("endYear", *endYear))
+	}
+	if *runTimeMinutes != "" {
+		stringFilters = append(stringFilters, NewStringFilter("runTimeMinutes", *runTimeMinutes))
+	}
+	if *titleType != "" {
+		stringFilters = append(stringFilters, NewStringFilter("titleType", *titleType))
+	}
+
+	if *primaryTitle != "" {
+		stringFilters = append(stringFilters, NewStringFilter("primaryTitle", *primaryTitle))
+	}
+
+	if *originalTitle != "" {
+		stringFilters = append(stringFilters, NewStringFilter("originalTitle", *originalTitle))
+	}
+
+	if *genre != "" {
+		stringFilters = append(stringFilters, NewStringFilter("genre", *genre))
+	}
+
+	if *genres != "" {
+		stringFilters = append(stringFilters, NewStringFilter("genres", *genres))
+	}
+	if *apiKey == "" {
+		*apiKey = os.Getenv("OMDB_APIKEY")
+	}
+
+	fmt.Println(*plotFilter)
+	re := regexp.MustCompile(*plotFilter)
 	config := Configuration{
 		Opts: Options{
 			FilePath:      *filePath,
-			MaxApiRequest: *maxApiRequest,
 			MaxRunTime:    *maxRunTime,
 			MaxRequests:   *maxRequests,
 			NumGoRoutines: *numGoRoutines,
 		},
-		Filters: Filters{
-			TitleType:      *titleType,
-			PrimaryTitle:   *primaryTitle,
-			OriginalTitle:  *originalTitle,
-			IsAdult:        *isAdult,
-			Genre:          *genre,
-			StartYear:      *startYear,
-			EndYear:        *endYear,
-			RunTimeMinutes: *runTimeMinutes,
-			Genres:         *genres,
-			PlotFilter:     *plotFilter,
-		},
+		Filters:      stringFilters,
+		RegExpFilter: re,
+		ApiKey:       *apiKey,
 	}
 	return &config, nil
 }

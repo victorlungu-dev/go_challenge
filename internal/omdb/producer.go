@@ -1,34 +1,57 @@
 package omdb
 
 import (
+	"azarc.io/internal/argparser"
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
 )
 
-type Producer struct {
-	OutChannel chan string
-	Quit       chan bool
+// global header of the input file
+var Header *argparser.TsvHeader
+
+type Reader struct {
+	Out      chan string
+	Quit     chan bool
+	FastQuit chan bool
 }
 
-func (p Producer) Produce(path string) {
+func (r Reader) StreamLines(path string) {
 	f, err := os.Open(path)
-	defer f.Close()
 	if err != nil {
-		panic(err)
+		fmt.Println("invalid path or file doesn't exist")
+		r.Quit <- true
+		return
 	}
-	p.scanFile(f)
+	defer f.Close()
+	r.scanFile(f)
 }
 
-func (p Producer) scanFile(f *os.File) {
+func (r Reader) scanFile(f *os.File) {
 	s := bufio.NewScanner(f)
+	defer close(r.Out)
 	for s.Scan() {
 		select {
-		case <-p.Quit:
-			close(p.OutChannel)
+		case <-r.FastQuit:
 			return
-		case p.OutChannel <- strings.Trim(s.Text(), " "):
+		case <-r.Quit:
+			return
+		default:
+			if Header == nil {
+				initHeader(strings.Trim(s.Text(), " "))
+			} else {
+				r.Out <- strings.Trim(s.Text(), " ")
+			}
 		}
 	}
-	p.Quit <- true
+	fmt.Println("Scan complete")
+}
+
+func initHeader(ln string) {
+	Header = &argparser.TsvHeader{Columns: map[string]int{}}
+	parts := strings.Split(ln, "\t")
+	for i, v := range parts {
+		Header.Columns[v] = i
+	}
 }
